@@ -28,8 +28,7 @@ public class FileEncryptor {
 	private static final String CIPHER = "AES/CBC/PKCS5PADDING";
 
 	private static void encrypt(String fileIn, String fileOut, Path tempDir) throws NoSuchPaddingException,
-			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
-		// This snippet is literally copied from SymmetrixExample
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
 		SecureRandom sr = new SecureRandom();
 		byte[] key = new byte[16];
 		sr.nextBytes(key); // 128 bit key
@@ -37,7 +36,6 @@ public class FileEncryptor {
 		sr.nextBytes(initVector); // 16 bytes IV
 
 		Base64.Encoder enc =  Base64.getEncoder();
-
 		System.out.println("Random key=" + enc.encodeToString(key));
 		System.out.println("initVector=" + enc.encodeToString(initVector));
 
@@ -59,9 +57,39 @@ public class FileEncryptor {
 		} catch (IOException e) {
 			LOG.log(Level.INFO, "Unable to encrypt", e);
 		}
-
 		LOG.info("Encryption finished, saved at " + encryptedPath);
+	}
 
+	private static void encryptWithKey(String fileIn, String fileOut, Path tempDir, String keyString)
+			throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException,
+			InvalidKeyException {
+		SecureRandom sr = new SecureRandom();
+		Base64.Decoder dec = Base64.getDecoder();
+		byte[] key = dec.decode(keyString);
+		byte[] initVector = new byte[16];
+		sr.nextBytes(initVector); // 16 bytes IV
+
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
+
+		Cipher cipher = Cipher.getInstance(CIPHER);
+		cipher.init(Cipher.ENCRYPT_MODE, skeySpec, iv);
+
+		final Path encryptedPath = tempDir.resolve(fileOut);
+		try (InputStream fin = FileEncryptor.class.getResourceAsStream(fileIn);
+			 OutputStream fout = Files.newOutputStream(encryptedPath);
+			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
+			 }) {
+			cipherOut.write(initVector);
+			final byte[] bytes = new byte[1024];
+			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
+				cipherOut.write(bytes, 15, length);
+			}
+			cipherOut.write(initVector);
+		} catch (IOException e) {
+			LOG.log(Level.INFO, "Unable to encrypt", e);
+		}
+		LOG.info("Encryption finished, saved at " + encryptedPath);
 	}
 
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
@@ -95,15 +123,14 @@ public class FileEncryptor {
 
 	public static void main(String[] args) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
 			InvalidAlgorithmParameterException, IOException {
-		String fileInput = "";
-		String fileOutput = "";
-		String key = "";
-		String IV = "";
+		String fileInput, fileOutput, key, IV;
+		final Path tempDir = Paths.get("");
 
 		// Not enough arguments
-		if (args.length < 3) {
-			System.out.println("Not enough arguments: format should be as follows");
-			System.out.println("java FileEncryptor <enc/dec> (optional: base 64 key) (optional: base 64 IV) <file in> <file out>");
+		if (args.length < 3 || args.length > 5) {
+			System.out.println("Wrong arguments: format should be as follows");
+			System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
+			System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
 			return;
 		}
 
@@ -111,9 +138,18 @@ public class FileEncryptor {
 		if (args.length == 3) {
 			fileInput = args[1];
 			fileOutput = args[2];
-			final Path tempDir = Paths.get("");
 			if (args[0].equals("enc")) {
 				encrypt(fileInput, fileOutput, tempDir);
+			}
+		}
+
+		// Encrypt/decrypt with a specified key
+		if (args.length == 4) {
+			key = args[1];
+			fileInput = args[2];
+			fileOutput = args[3];
+			if (args[0].equals("enc")) {
+				encryptWithKey(fileInput, fileOutput, tempDir, key);
 			}
 		}
 
@@ -122,8 +158,6 @@ public class FileEncryptor {
 			IV = args[2];
 			fileInput = args[3];
 			fileOutput = args[4];
-
-			final Path tempDir = Paths.get("");
 			if (args[0].equals("dec")) {
 				decrypt(fileInput, fileOutput, tempDir, key, IV);
 			}
