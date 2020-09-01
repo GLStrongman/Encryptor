@@ -76,16 +76,16 @@ public class FileEncryptor {
 		cipher.init(Cipher.ENCRYPT_MODE, skeySpec, iv);
 
 		final Path encryptedPath = tempDir.resolve(fileOut);
+
 		try (InputStream fin = FileEncryptor.class.getResourceAsStream(fileIn);
 			 OutputStream fout = Files.newOutputStream(encryptedPath);
 			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
 			 }) {
-			cipherOut.write(initVector);
+			fout.write(initVector);
 			final byte[] bytes = new byte[1024];
 			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
-				cipherOut.write(bytes, 15, length);
+				cipherOut.write(bytes, 0, length);
 			}
-			cipherOut.write(initVector);
 		} catch (IOException e) {
 			LOG.log(Level.INFO, "Unable to encrypt", e);
 		}
@@ -93,7 +93,7 @@ public class FileEncryptor {
 	}
 
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
-			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
+					NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
 		SecureRandom sr = new SecureRandom();
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
@@ -108,8 +108,42 @@ public class FileEncryptor {
 		final Path decryptedPath = tempDir.resolve(fileOut);
 
 		try (InputStream encryptedData = Files.newInputStream(encryptedPath);
-			 CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
-			 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
+				 CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
+				 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
+			final byte[] bytes = new byte[1024];
+			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
+				decryptedOut.write(bytes, 0, length);
+			}
+		} catch (IOException ex) {
+			Logger.getLogger(FileEncryptor.class.getName()).log(Level.SEVERE, "Unable to decrypt", ex);
+		}
+
+		LOG.info("Decryption complete, open " + decryptedPath);
+	}
+
+	private static void decryptWithIV(String fileIn, String fileOut, Path tempDir, String keyString) throws NoSuchPaddingException,
+					NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
+		SecureRandom sr = new SecureRandom();
+		Base64.Decoder dec = Base64.getDecoder();
+		byte[] key = dec.decode(keyString);
+		//byte[] initVector = dec.decode(IVString);
+
+		final byte[] initVector = new byte[16];
+		final Path encryptedPath = tempDir.resolve(fileIn);
+		final Path decryptedPath = tempDir.resolve(fileOut);
+		Cipher cipher = Cipher.getInstance(CIPHER);
+
+		InputStream encryptedData = Files.newInputStream(encryptedPath);
+
+		encryptedData.read(initVector);
+
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
+
+		cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
+
+		try (CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
+				 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
 			final byte[] bytes = new byte[1024];
 			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
 				decryptedOut.write(bytes, 0, length);
@@ -150,6 +184,9 @@ public class FileEncryptor {
 			fileOutput = args[3];
 			if (args[0].equals("enc")) {
 				encryptWithKey(fileInput, fileOutput, tempDir, key);
+			}
+			else if (args[0].equals("dec")){
+				decryptWithIV(fileInput, fileOutput, tempDir, key);
 			}
 		}
 
