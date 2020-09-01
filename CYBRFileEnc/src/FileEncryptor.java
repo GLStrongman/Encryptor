@@ -50,6 +50,7 @@ public class FileEncryptor {
 			 OutputStream fout = Files.newOutputStream(encryptedPath);
 			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
 			 }) {
+			fout.write(initVector);
 			final byte[] bytes = new byte[1024];
 			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
 				cipherOut.write(bytes, 0, length);
@@ -93,22 +94,23 @@ public class FileEncryptor {
 	}
 
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
-					NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
 		SecureRandom sr = new SecureRandom();
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
 		byte[] initVector = dec.decode(IVString);
-
-		IvParameterSpec iv = new IvParameterSpec(initVector);
-		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
-
-		Cipher cipher = Cipher.getInstance(CIPHER);
-		cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
+		byte[] fileIV = new byte[16];
 		final Path encryptedPath = tempDir.resolve(fileIn);
 		final Path decryptedPath = tempDir.resolve(fileOut);
 
-		try (InputStream encryptedData = Files.newInputStream(encryptedPath);
-				 CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
+		Cipher cipher = Cipher.getInstance(CIPHER);
+		InputStream encryptedData = Files.newInputStream(encryptedPath);
+		encryptedData.read(fileIV);
+		cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
+
+		try ( CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
 				 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
 			final byte[] bytes = new byte[1024];
 			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
@@ -123,11 +125,8 @@ public class FileEncryptor {
 
 	private static void decryptWithIV(String fileIn, String fileOut, Path tempDir, String keyString) throws NoSuchPaddingException,
 					NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
-		SecureRandom sr = new SecureRandom();
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
-		//byte[] initVector = dec.decode(IVString);
-
 		final byte[] initVector = new byte[16];
 		final Path encryptedPath = tempDir.resolve(fileIn);
 		final Path decryptedPath = tempDir.resolve(fileOut);
@@ -160,14 +159,6 @@ public class FileEncryptor {
 		String fileInput, fileOutput, key, IV;
 		final Path tempDir = Paths.get("");
 
-		// Not enough arguments
-		if (args.length < 3 || args.length > 5) {
-			System.out.println("Wrong arguments: format should be as follows");
-			System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
-			System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
-			return;
-		}
-
 		// Encrypt/decrypt with no specified key
 		if (args.length == 3) {
 			fileInput = args[1];
@@ -178,7 +169,7 @@ public class FileEncryptor {
 		}
 
 		// Encrypt/decrypt with a specified key
-		if (args.length == 4) {
+		else if (args.length == 4) {
 			key = args[1];
 			fileInput = args[2];
 			fileOutput = args[3];
@@ -190,7 +181,7 @@ public class FileEncryptor {
 			}
 		}
 
-		if (args.length == 5) {
+		else if (args.length == 5) {
 			key = args[1];
 			IV = args[2];
 			fileInput = args[3];
@@ -198,6 +189,13 @@ public class FileEncryptor {
 			if (args[0].equals("dec")) {
 				decrypt(fileInput, fileOutput, tempDir, key, IV);
 			}
+		}
+
+		// Not enough arguments
+		else if (args.length < 3 || args.length > 5) {
+			System.out.println("Wrong arguments: format should be as follows");
+			System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
+			System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
 		}
 	}
 }
