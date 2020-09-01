@@ -28,7 +28,7 @@ public class FileEncryptor {
 	private static final String CIPHER = "AES/CBC/PKCS5PADDING";
 
 	private static void encrypt(String fileIn, String fileOut, Path tempDir) throws NoSuchPaddingException,
-			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
 		SecureRandom sr = new SecureRandom();
 		byte[] key = new byte[16];
 		sr.nextBytes(key); // 128 bit key
@@ -95,7 +95,6 @@ public class FileEncryptor {
 
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
 			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
-		SecureRandom sr = new SecureRandom();
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
 		byte[] initVector = dec.decode(IVString);
@@ -159,43 +158,48 @@ public class FileEncryptor {
 		String fileInput, fileOutput, key, IV;
 		final Path tempDir = Paths.get("");
 
-		// Encrypt/decrypt with no specified key
-		if (args.length == 3) {
-			fileInput = args[1];
-			fileOutput = args[2];
-			if (args[0].equals("enc")) {
-				encrypt(fileInput, fileOutput, tempDir);
+		try {
+			// Encrypt/decrypt with no specified key
+			if (args.length == 3) {
+				fileInput = args[1];
+				fileOutput = args[2];
+				if (args[0].equals("enc")) {
+					encrypt(fileInput, fileOutput, tempDir);
+				}
 			}
-		}
 
-		// Encrypt/decrypt with a specified key
-		else if (args.length == 4) {
-			key = args[1];
-			fileInput = args[2];
-			fileOutput = args[3];
-			if (args[0].equals("enc")) {
-				encryptWithKey(fileInput, fileOutput, tempDir, key);
+			// Encrypt/decrypt with a specified key
+			else if (args.length == 4) {
+				key = args[1];
+				fileInput = args[2];
+				fileOutput = args[3];
+				if (args[0].equals("enc")) {
+					encryptWithKey(fileInput, fileOutput, tempDir, key);
+				}
+				else if (args[0].equals("dec")){
+					decryptWithIV(fileInput, fileOutput, tempDir, key);
+				}
 			}
-			else if (args[0].equals("dec")){
-				decryptWithIV(fileInput, fileOutput, tempDir, key);
-			}
-		}
 
-		else if (args.length == 5) {
-			key = args[1];
-			IV = args[2];
-			fileInput = args[3];
-			fileOutput = args[4];
-			if (args[0].equals("dec")) {
-				decrypt(fileInput, fileOutput, tempDir, key, IV);
+			else if (args.length == 5) {
+				key = args[1];
+				IV = args[2];
+				fileInput = args[3];
+				fileOutput = args[4];
+				if (args[0].equals("dec")) {
+					decrypt(fileInput, fileOutput, tempDir, key, IV);
+				}
 			}
-		}
 
-		// Not enough arguments
-		else if (args.length < 3 || args.length > 5) {
-			System.out.println("Wrong arguments: format should be as follows");
-			System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
-			System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
+			// Not enough arguments
+			else if (args.length < 3 || args.length > 5) {
+				System.out.println("Wrong arguments: format should be as follows");
+				System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
+				System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
+			}
+
+		} catch (InvalidKeyException e){
+			LOG.info("Key is not valid, please give a valid Base64 key.");
 		}
 	}
 }
