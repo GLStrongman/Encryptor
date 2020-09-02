@@ -8,14 +8,15 @@ import java.security.InvalidAlgorithmParameterException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.KeySpec;
 import java.util.Base64;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.crypto.Cipher;
-import javax.crypto.CipherInputStream;
-import javax.crypto.CipherOutputStream;
-import javax.crypto.NoSuchPaddingException;
+import javax.crypto.*;
 import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.PBEParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
@@ -93,6 +94,78 @@ public class FileEncryptor {
 		LOG.info("Encryption finished, saved at " + encryptedPath);
 	}
 
+	private static void encryptWithPassword(String fileIn, String fileOut, Path tempDir, String userPassword)
+			throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException,
+			InvalidKeyException, InvalidKeySpecException {
+		SecureRandom sr = new SecureRandom();
+
+		byte[] initVector = new byte[16];
+		sr.nextBytes(initVector);
+
+		char[] password = userPassword.toCharArray();
+		System.out.println("Hi there" + userPassword);
+
+		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, 256);
+		SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+		SecretKey pbeKey = keyFac.generateSecret(keySpec);
+		SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), ALGORITHM);
+
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+
+		Cipher cipher = Cipher.getInstance(CIPHER);
+		cipher.init(Cipher.ENCRYPT_MODE, sKey, iv);
+
+		final Path encryptedPath = tempDir.resolve(fileOut);
+
+		try (InputStream fin = FileEncryptor.class.getResourceAsStream(fileIn);
+			 OutputStream fout = Files.newOutputStream(encryptedPath);
+			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
+			 }) {
+			fout.write(initVector);
+			final byte[] bytes = new byte[1024];
+			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
+				cipherOut.write(bytes, 0, length);
+			}
+		} catch (IOException e) {
+			LOG.log(Level.INFO, "Unable to encrypt", e);
+		}
+		LOG.info("Encryption finished, saved at " + encryptedPath);
+	}
+
+	private static void decryptwithPassword(String fileIn, String fileOut, Path tempDir, String userPassword) throws NoSuchPaddingException,
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException, InvalidKeySpecException, BadPaddingException {
+		byte[] initVector = new byte[16];
+		final Path encryptedPath = tempDir.resolve(fileIn);
+		final Path decryptedPath = tempDir.resolve(fileOut);
+
+		InputStream encryptedData = Files.newInputStream(encryptedPath);
+		encryptedData.read(initVector);
+
+		char[] password = userPassword.toCharArray();
+		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, 256);
+		SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+		SecretKey pbeKey = keyFac.generateSecret(keySpec);
+		SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), ALGORITHM);
+
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+
+		Cipher cipher = Cipher.getInstance(CIPHER);
+		cipher.init(Cipher.DECRYPT_MODE, sKey, iv);
+
+		try (CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
+			 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
+			final byte[] bytes = new byte[1024];
+			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
+				decryptedOut.write(bytes, 0, length);
+			}
+		} catch (IOException ex) {
+			//Logger.getLogger(FileEncryptor.class.getName()).log(Level.SEVERE, "Unable to decrypt", ex);
+			throw new BadPaddingException();
+		}
+
+		LOG.info("Decryption complete, open " + decryptedPath);
+	}
+
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
 			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
 		Base64.Decoder dec = Base64.getDecoder();
@@ -122,8 +195,8 @@ public class FileEncryptor {
 		LOG.info("Decryption complete, open " + decryptedPath);
 	}
 
-	private static void decryptWithIV(String fileIn, String fileOut, Path tempDir, String keyString) throws NoSuchPaddingException,
-					NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
+	private static void decryptWithoutIV(String fileIn, String fileOut, Path tempDir, String keyString) throws NoSuchPaddingException,
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException, BadPaddingException {
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
 		final byte[] initVector = new byte[16];
@@ -153,18 +226,27 @@ public class FileEncryptor {
 		LOG.info("Decryption complete, open " + decryptedPath);
 	}
 
+	private static void wrongArg(){
+		System.out.println("Wrong arguments: format should be as follows");
+		System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
+		System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
+	}
+
 	public static void main(String[] args) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
-			InvalidAlgorithmParameterException, IOException {
+			InvalidAlgorithmParameterException, IOException, BadPaddingException {
 		String fileInput, fileOutput, key, IV;
 		final Path tempDir = Paths.get("");
 
 		try {
-			// Encrypt/decrypt with no specified key
+			// Encrypt with no specified key
 			if (args.length == 3) {
 				fileInput = args[1];
 				fileOutput = args[2];
 				if (args[0].equals("enc")) {
 					encrypt(fileInput, fileOutput, tempDir);
+				}
+				else {
+					wrongArg();
 				}
 			}
 
@@ -173,11 +255,29 @@ public class FileEncryptor {
 				key = args[1];
 				fileInput = args[2];
 				fileOutput = args[3];
-				if (args[0].equals("enc")) {
-					encryptWithKey(fileInput, fileOutput, tempDir, key);
+				// Check if user has given a key
+				if (key.contains("A==") || key.contains("g==") || key.contains("w==") || key.contains("Q==")){
+					if (args[0].equals("enc")) {
+						encryptWithKey(fileInput, fileOutput, tempDir, key);
+					}
+					else if (args[0].equals("dec")){
+						decryptWithoutIV(fileInput, fileOutput, tempDir, key);
+					}
+					else {
+						wrongArg();
+					}
 				}
-				else if (args[0].equals("dec")){
-					decryptWithIV(fileInput, fileOutput, tempDir, key);
+				// Assume user has given a password
+				else {
+					if (args[0].equals("enc")) {
+						encryptWithPassword(fileInput, fileOutput, tempDir, key);
+					}
+					else if (args[0].equals("dec")){
+						decryptwithPassword(fileInput, fileOutput, tempDir, key);
+					}
+					else {
+						wrongArg();
+					}
 				}
 			}
 
@@ -189,17 +289,24 @@ public class FileEncryptor {
 				if (args[0].equals("dec")) {
 					decrypt(fileInput, fileOutput, tempDir, key, IV);
 				}
+				else {
+					wrongArg();
+				}
 			}
 
 			// Not enough arguments
 			else if (args.length < 3 || args.length > 5) {
-				System.out.println("Wrong arguments: format should be as follows");
-				System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
-				System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
+				wrongArg();
 			}
 
-		} catch (InvalidKeyException e){
-			LOG.info("Key is not valid, please give a valid Base64 key.");
+		} catch (InvalidKeyException e) {
+			LOG.info("Key is not valid, please provide a valid Base64 key.");
+		} catch (IOException e) {
+			LOG.info("Input/output file is not valid, please provide a valid file.");
+		} catch (InvalidKeySpecException e) {
+			LOG.info("Password is not valid, please provide a valid password.");
+		} catch (BadPaddingException e) {
+			LOG.info("Unable to decrypt - are you sure your key is correct?");
 		}
 	}
 }
