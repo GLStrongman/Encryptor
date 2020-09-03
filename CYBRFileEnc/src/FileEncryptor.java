@@ -372,6 +372,26 @@ public class FileEncryptor {
 		System.out.println("java FileEncryptor dec <base 64 key> <optional: base 64 IV> <file in> <file out>");
 	}
 
+	private static void info(String fileIn, Path tempDir) throws IOException {
+		byte[] initVector = new byte[16];
+		byte[] mdByte = new byte[7];
+		final Path encryptedPath = tempDir.resolve(fileIn);
+
+		InputStream encryptedData = Files.newInputStream(encryptedPath);
+		encryptedData.read(initVector);
+		encryptedData.read(mdByte);
+
+		String metadata = new String(mdByte);
+		String[] mdInfo = metadata.split(",");
+
+		if (mdInfo[0].equals("BFA")){
+			System.out.println("Blowfish " + mdInfo[1]);
+		}
+		else if (mdInfo[0].equals("AES")){
+			System.out.println("AES " + mdInfo[1]);
+		}
+	}
+
 	public static void main(String[] args) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
 			InvalidAlgorithmParameterException, IOException, BadPaddingException {
 		String fileInput, fileOutput, key, IV, algorithm, keyLength;
@@ -380,11 +400,12 @@ public class FileEncryptor {
 		try {
 			// Show metadata
 			if (args.length == 2){
-
+				fileInput = args[1];
+				info(fileInput, tempDir);
 			}
 
 			// Encrypt with no specified key
-			if (args.length == 3) {
+			else if (args.length == 3) {
 				fileInput = args[1];
 				fileOutput = args[2];
 				if (args[0].equals("enc")) {
