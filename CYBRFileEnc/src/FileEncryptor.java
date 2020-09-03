@@ -35,6 +35,9 @@ public class FileEncryptor {
 		sr.nextBytes(key); // 128 bit key
 		byte[] initVector = new byte[16];
 		sr.nextBytes(initVector); // 16 bytes IV
+		String metadata = "AES," + "256";
+		byte[] mdByte = new byte[7];
+		mdByte = metadata.getBytes();
 
 		Base64.Encoder enc =  Base64.getEncoder();
 		System.out.println("Random key=" + enc.encodeToString(key));
@@ -52,6 +55,7 @@ public class FileEncryptor {
 			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
 			 }) {
 			fout.write(initVector);
+			fout.write(mdByte);
 			final byte[] bytes = new byte[1024];
 			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
 				cipherOut.write(bytes, 0, length);
@@ -70,6 +74,13 @@ public class FileEncryptor {
 		byte[] key = dec.decode(keyString);
 		byte[] initVector = new byte[16];
 		sr.nextBytes(initVector); // 16 bytes IV
+		String metadata = "AES," + "256";
+		byte[] mdByte = new byte[7];
+		mdByte = metadata.getBytes();
+
+		Base64.Encoder enc =  Base64.getEncoder();
+		System.out.println("Random key=" + enc.encodeToString(key));
+		System.out.println("initVector=" + enc.encodeToString(initVector));
 
 		IvParameterSpec iv = new IvParameterSpec(initVector);
 		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
@@ -84,6 +95,7 @@ public class FileEncryptor {
 			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
 			 }) {
 			fout.write(initVector);
+			fout.write(mdByte);
 			final byte[] bytes = new byte[1024];
 			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
 				cipherOut.write(bytes, 0, length);
@@ -101,14 +113,20 @@ public class FileEncryptor {
 
 		byte[] initVector = new byte[16];
 		sr.nextBytes(initVector);
+		String metadata = "AES," + "256";
+		byte[] mdByte = new byte[7];
+		mdByte = metadata.getBytes();
 
 		char[] password = userPassword.toCharArray();
-		System.out.println("Hi there" + userPassword);
 
 		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, 256);
 		SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
 		SecretKey pbeKey = keyFac.generateSecret(keySpec);
 		SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), ALGORITHM);
+
+		Base64.Encoder enc =  Base64.getEncoder();
+		System.out.println("Random key=" + sKey);
+		System.out.println("initVector=" + enc.encodeToString(initVector));
 
 		IvParameterSpec iv = new IvParameterSpec(initVector);
 
@@ -122,6 +140,7 @@ public class FileEncryptor {
 			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
 			 }) {
 			fout.write(initVector);
+			fout.write(mdByte);
 			final byte[] bytes = new byte[1024];
 			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
 				cipherOut.write(bytes, 0, length);
@@ -132,39 +151,99 @@ public class FileEncryptor {
 		LOG.info("Encryption finished, saved at " + encryptedPath);
 	}
 
-	private static void decryptwithPassword(String fileIn, String fileOut, Path tempDir, String userPassword) throws NoSuchPaddingException,
-			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException, InvalidKeySpecException, BadPaddingException {
-		byte[] initVector = new byte[16];
-		final Path encryptedPath = tempDir.resolve(fileIn);
-		final Path decryptedPath = tempDir.resolve(fileOut);
+	private static void encryptWithPasswordAES(String fileIn, String fileOut, Path tempDir, String userPassword, String userKeyLength)
+			throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException,
+			InvalidKeyException, InvalidKeySpecException {
+		SecureRandom sr = new SecureRandom();
 
-		InputStream encryptedData = Files.newInputStream(encryptedPath);
-		encryptedData.read(initVector);
+		byte[] initVector = new byte[16];
+		sr.nextBytes(initVector);
+		int keyLength = Integer.parseInt(userKeyLength);
+		String metadata = "AES," + keyLength;
+		byte[] mdByte = new byte[7];
+		mdByte = metadata.getBytes();
 
 		char[] password = userPassword.toCharArray();
-		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, 256);
+
+		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, keyLength);
 		SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
 		SecretKey pbeKey = keyFac.generateSecret(keySpec);
 		SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), ALGORITHM);
 
+		Base64.Encoder enc =  Base64.getEncoder();
+		System.out.println("Random key=" + enc.encodeToString(sKey.getEncoded()));
+		System.out.println("initVector=" + enc.encodeToString(initVector));
+
 		IvParameterSpec iv = new IvParameterSpec(initVector);
 
 		Cipher cipher = Cipher.getInstance(CIPHER);
-		cipher.init(Cipher.DECRYPT_MODE, sKey, iv);
+		cipher.init(Cipher.ENCRYPT_MODE, sKey, iv);
 
-		try (CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
-			 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
+		final Path encryptedPath = tempDir.resolve(fileOut);
+
+		try (InputStream fin = FileEncryptor.class.getResourceAsStream(fileIn);
+			 OutputStream fout = Files.newOutputStream(encryptedPath);
+			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
+			 }) {
+			fout.write(initVector);
+			fout.write(mdByte);
 			final byte[] bytes = new byte[1024];
-			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
-				decryptedOut.write(bytes, 0, length);
+			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
+				cipherOut.write(bytes, 0, length);
 			}
-		} catch (IOException ex) {
-			//Logger.getLogger(FileEncryptor.class.getName()).log(Level.SEVERE, "Unable to decrypt", ex);
-			throw new BadPaddingException();
+		} catch (IOException e) {
+			LOG.log(Level.INFO, "Unable to encrypt", e);
 		}
-
-		LOG.info("Decryption complete, open " + decryptedPath);
+		LOG.info("Encryption finished, saved at " + encryptedPath);
 	}
+
+	private static void encryptWithPasswordBF(String fileIn, String fileOut, Path tempDir, String userPassword, String userKeyLength)
+			throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException,
+			InvalidKeyException, InvalidKeySpecException {
+		SecureRandom sr = new SecureRandom();
+
+		int keyLength = Integer.parseInt(userKeyLength);
+		String metadata = "BFA," + keyLength;
+		byte[] mdByte = new byte[7];
+		mdByte = metadata.getBytes();
+		byte[] initVector = new byte[16];
+		sr.nextBytes(initVector);
+
+		char[] password = userPassword.toCharArray();
+		System.out.println("Hi there" + userPassword);
+
+		KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, keyLength);
+		SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+		SecretKey pbeKey = keyFac.generateSecret(keySpec);
+		SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), "Blowfish");
+
+		Base64.Encoder enc =  Base64.getEncoder();
+		System.out.println("Random key=" + enc.encodeToString(sKey.getEncoded()));
+		System.out.println("initVector=" + enc.encodeToString(initVector));
+
+		IvParameterSpec iv = new IvParameterSpec(initVector);
+
+		Cipher cipher = Cipher.getInstance("Blowfish");
+		cipher.init(Cipher.ENCRYPT_MODE, sKey);
+
+		final Path encryptedPath = tempDir.resolve(fileOut);
+
+		try (InputStream fin = FileEncryptor.class.getResourceAsStream(fileIn);
+			 OutputStream fout = Files.newOutputStream(encryptedPath);
+			 CipherOutputStream cipherOut = new CipherOutputStream(fout, cipher) {
+			 }) {
+			fout.write(initVector);
+			fout.write(mdByte);
+			final byte[] bytes = new byte[1024];
+			for (int length = fin.read(bytes); length != -1; length = fin.read(bytes)) {
+				cipherOut.write(bytes, 0, length);
+			}
+		} catch (IOException e) {
+			LOG.log(Level.INFO, "Unable to encrypt", e);
+		}
+		LOG.info("Encryption finished, saved at " + encryptedPath);
+	}
+
 
 	private static void decrypt(String fileIn, String fileOut, Path tempDir, String keyString, String IVString) throws NoSuchPaddingException,
 			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException {
@@ -172,6 +251,7 @@ public class FileEncryptor {
 		byte[] key = dec.decode(keyString);
 		byte[] initVector = dec.decode(IVString);
 		byte[] fileIV = new byte[16];
+		byte[] mdByte = new byte[7];
 		final Path encryptedPath = tempDir.resolve(fileIn);
 		final Path decryptedPath = tempDir.resolve(fileOut);
 
@@ -180,6 +260,8 @@ public class FileEncryptor {
 		Cipher cipher = Cipher.getInstance(CIPHER);
 		InputStream encryptedData = Files.newInputStream(encryptedPath);
 		encryptedData.read(fileIV);
+		encryptedData.read(mdByte);
+
 		cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
 
 		try ( CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
@@ -200,6 +282,7 @@ public class FileEncryptor {
 		Base64.Decoder dec = Base64.getDecoder();
 		byte[] key = dec.decode(keyString);
 		final byte[] initVector = new byte[16];
+		byte[] mdByte = new byte[7];
 		final Path encryptedPath = tempDir.resolve(fileIn);
 		final Path decryptedPath = tempDir.resolve(fileOut);
 		Cipher cipher = Cipher.getInstance(CIPHER);
@@ -207,6 +290,7 @@ public class FileEncryptor {
 		InputStream encryptedData = Files.newInputStream(encryptedPath);
 
 		encryptedData.read(initVector);
+		encryptedData.read(mdByte);
 
 		IvParameterSpec iv = new IvParameterSpec(initVector);
 		SecretKeySpec skeySpec = new SecretKeySpec(key, ALGORITHM);
@@ -226,6 +310,62 @@ public class FileEncryptor {
 		LOG.info("Decryption complete, open " + decryptedPath);
 	}
 
+	private static void decryptWithPassword(String fileIn, String fileOut, Path tempDir, String userPassword) throws NoSuchPaddingException,
+			NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException, IOException, InvalidKeySpecException, BadPaddingException {
+		byte[] initVector = new byte[16];
+		byte[] mdByte = new byte[7];
+		final Path encryptedPath = tempDir.resolve(fileIn);
+		final Path decryptedPath = tempDir.resolve(fileOut);
+
+		InputStream encryptedData = Files.newInputStream(encryptedPath);
+		encryptedData.read(initVector);
+		encryptedData.read(mdByte);
+
+		String metadata = new String(mdByte);
+		String[] mdInfo = metadata.split(",");
+		int keyLength = Integer.parseInt(mdInfo[1]);
+		char[] password = userPassword.toCharArray();
+		Cipher cipher = Cipher.getInstance(CIPHER);
+
+		if (mdInfo[0].equals("AES")){
+			KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, keyLength);
+			SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+			SecretKey pbeKey = keyFac.generateSecret(keySpec);
+			SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), ALGORITHM);
+
+			IvParameterSpec iv = new IvParameterSpec(initVector);
+
+			cipher = Cipher.getInstance(CIPHER);
+			cipher.init(Cipher.DECRYPT_MODE, sKey, iv);
+		}
+		else {
+			KeySpec keySpec = new PBEKeySpec(password, initVector, 65536, keyLength);
+			SecretKeyFactory keyFac = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+			SecretKey pbeKey = keyFac.generateSecret(keySpec);
+			SecretKey sKey = new SecretKeySpec(pbeKey.getEncoded(), "Blowfish");
+
+			IvParameterSpec iv = new IvParameterSpec(initVector);
+
+			cipher = Cipher.getInstance("Blowfish");
+			cipher.init(Cipher.DECRYPT_MODE, sKey);
+		}
+
+		try (CipherInputStream decryptStream = new CipherInputStream(encryptedData, cipher);
+			 OutputStream decryptedOut = Files.newOutputStream(decryptedPath)) {
+			final byte[] bytes = new byte[1024];
+			for (int length = decryptStream.read(bytes); length != -1; length = decryptStream.read(bytes)) {
+				decryptedOut.write(bytes, 0, length);
+			}
+		} catch (IOException ex) {
+			//Logger.getLogger(FileEncryptor.class.getName()).log(Level.SEVERE, "Unable to decrypt", ex);
+			throw new BadPaddingException();
+		}
+
+		LOG.info("Decryption complete, open " + decryptedPath);
+	}
+
+
+
 	private static void wrongArg(){
 		System.out.println("Wrong arguments: format should be as follows");
 		System.out.println("java FileEncryptor enc <optional: base 64 key> <file in> <file out>");
@@ -234,10 +374,15 @@ public class FileEncryptor {
 
 	public static void main(String[] args) throws NoSuchAlgorithmException, NoSuchPaddingException, InvalidKeyException,
 			InvalidAlgorithmParameterException, IOException, BadPaddingException {
-		String fileInput, fileOutput, key, IV;
+		String fileInput, fileOutput, key, IV, algorithm, keyLength;
 		final Path tempDir = Paths.get("");
 
 		try {
+			// Show metadata
+			if (args.length == 2){
+
+			}
+
 			// Encrypt with no specified key
 			if (args.length == 3) {
 				fileInput = args[1];
@@ -273,7 +418,7 @@ public class FileEncryptor {
 						encryptWithPassword(fileInput, fileOutput, tempDir, key);
 					}
 					else if (args[0].equals("dec")){
-						decryptwithPassword(fileInput, fileOutput, tempDir, key);
+						decryptWithPassword(fileInput, fileOutput, tempDir, key);
 					}
 					else {
 						wrongArg();
@@ -294,8 +439,33 @@ public class FileEncryptor {
 				}
 			}
 
-			// Not enough arguments
-			else if (args.length < 3 || args.length > 5) {
+			else if (args.length == 6){
+				algorithm = args[1].toLowerCase();
+				keyLength = args[2];
+				key = args[3];
+				fileInput = args[4];
+				fileOutput = args[5];
+				if (Integer.parseInt(keyLength) > 999){
+					System.out.println("Key length is too big, please use a key of length 999 or less.");
+				}
+				else if (args[0].equals("enc")){
+					if (algorithm.equals("aes")){
+						encryptWithPasswordAES(fileInput, fileOutput, tempDir, key, keyLength);
+					}
+					else if (algorithm.equals("bf") || algorithm.equals("blowfish")){
+						encryptWithPasswordBF(fileInput, fileOutput, tempDir, key, keyLength);
+					}
+					else {
+						System.out.println("Invalid encryption method, try AES or Blowfish.");
+					}
+				}
+				else {
+					wrongArg();
+				}
+			}
+
+			// Not enough/too many arguments
+			else {
 				wrongArg();
 			}
 
